@@ -108,11 +108,20 @@ check_iso_names() {
 	fi
 }
 
+is_installed() {
+	dpkg --get-selections |awk '{print $1}' |grep -P "^$1$" -q
+}
+
 prompt_install_prereqs() {
-	read -p "Install pre-requisites? > " resp && [[ $resp =~ $yespat ]] && {
+	if is_installed squashfs-tools && is_installed syslinux ; then
+		return
+	fi
+
+	read -p "Install pre-requisites? > " resp
+	if [[ $resp =~ $yespat ]]; then
 	    infoe "Installing/updating squashfs-tools and syslinux"
 	    sudo apt-get update && sudo apt-get install squashfs-tools syslinux -y
-	} || :
+	fi
 }
 
 ensure_tempdir() {
@@ -194,27 +203,21 @@ customizeiso() {
 	sudo chroot edit mount -t sysfs none /sys || :
 	sudo mount -o bind /dev/pts edit/dev/pts || :
 
-	#sudo chroot edit export HOME=/root
-	#sudo chroot edit export LC_ALL=C
-
 	# Step 4:
-	# Normally this is where you'd do your customizations.
-	# I recommend copying from your main system's /etc/apt/sources.list to your ISO's sources.list.
 	infoe "Now make customizations from the CLI"
 	infoe "If you want to replace the desktop wallpaper, use the instructions related to your window manager. You may have to replace the image somewhere under /usr/share"
 	infoe "If you need to copy in new files to the ISO, use another terminal to copy to remaster/livecdtmp/extract-cd/ as root"
 	infoe "To use apt-get properly, you may have to copy from your /etc/apt/sources.list to this ISO, then run apt-get update and finally resolvconf -u to connect to the internet"
 	infoe "When you are done, just type 'exit' to continue the process"
 	infoe "You are now in the target ISO's chroot context"
-	sudo chroot edit
+
+	HOME=/root LC_ALL=C sudo chroot edit
 
 	# Step 5:
 	# Back out of the chroot
-	#sudo chroot edit umount /proc || sudo chroot edit umount -lf /proc
 	infoe "Backing out of the chroot"
 	sudo chroot edit umount /proc || :
 	sudo chroot edit umount /sys || :
-	#sudo chroot edit umount /dev/pts
 	sudo umount mnt || :
 	sudo umount edit/run || :
 	sudo umount edit/dev/pts || :
