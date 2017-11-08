@@ -1,7 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
-function printhelp {
+CLR_GRN="\033[33;1m"
+CLR_RED="\033[31;1m"
+CLR_DEF="\033[0m"
+
+infoe() {
+	echo -e "$CLR_GRN$*$CLR_DEF"
+}
+
+printhelp() {
 cat <<EOHELP
 
 remaster.sh
@@ -62,7 +70,7 @@ main() {
 		    ;;
 		*)
 		    [[ ! -f "$term" ]] && {
-		    	echo "Unknown option $term"
+		    	faile "Unknown option $term"
 		    	exit 98
 		    }
 		    ;;
@@ -87,7 +95,7 @@ main() {
 		buildiso)
 			buildiso;;
 		*)
-			echo "Invalid entry point"
+			faile "Invalid entry point"
 			exit 2
 			;;
 	esac
@@ -102,7 +110,7 @@ check_iso_names() {
 
 prompt_install_prereqs() {
 	read -p "Install pre-requisites? > " resp && [[ $resp =~ $yespat ]] && {
-	    echo "Installing/updating squashfs-tools and syslinux"
+	    infoe "Installing/updating squashfs-tools and syslinux"
 	    sudo apt-get update && sudo apt-get install squashfs-tools syslinux -y
 	} || :
 }
@@ -120,7 +128,7 @@ isoname_in_temp() {
 	if [[ -f "../$ORIGINAL_ISO_NAME" ]]; then
 	    ORIGINAL_ISO_NAME="../$ORIGINAL_ISO_NAME"
 	elif [[ ! -f "$ORIGINAL_ISO_NAME" ]]; then
-	    echo "$ORIGINAL_ISO_NAME cannot be found. Please specify its full path with the --iniso parameter." >&2
+	    infoe "$ORIGINAL_ISO_NAME cannot be found. Please specify its full path with the --iniso parameter." >&2
 	    exit 2
 	fi
 }
@@ -130,9 +138,9 @@ ensure_consistent_environment() {
 	ensure_tempdir
 	isoname_in_temp
 
-	echo "Acquiring root privilege ..."
+	infoe "Acquiring root privilege ..."
 	sudo su -c ":" || {
-		echo "Failed to run command as root."
+		infoe "Failed to run command as root."
 		exit 3
 	}
 }
@@ -140,7 +148,7 @@ ensure_consistent_environment() {
 are_you_happy() {
 	local thisstep="$1"; shift
 
-	echo "You can re-run this step using '$0 --entry=$thisstep --iniso=$ORIGINAL_ISO_NAME --outiso=$NEW_ISO_NAME'"
+	infoe "You can re-run this step using '$0 --entry=$thisstep --iniso=$ORIGINAL_ISO_NAME --outiso=$NEW_ISO_NAME'"
 
 	read -p "Are you happy with these changes ? > " resp
 
@@ -192,18 +200,18 @@ customizeiso() {
 	# Step 4:
 	# Normally this is where you'd do your customizations.
 	# I recommend copying from your main system's /etc/apt/sources.list to your ISO's sources.list.
-	echo "Now make customizations from the CLI"
-	echo "If you want to replace the desktop wallpaper, use the instructions related to your window manager. You may have to replace the image somewhere under /usr/share"
-	echo "If you need to copy in new files to the ISO, use another terminal to copy to remaster/livecdtmp/extract-cd/ as root"
-	echo "To use apt-get properly, you may have to copy from your /etc/apt/sources.list to this ISO, then run apt-get update and finally resolvconf -u to connect to the internet"
-	echo "When you are done, just type 'exit' to continue the process"
-	echo "You are now in the target ISO's chroot context"
+	infoe "Now make customizations from the CLI"
+	infoe "If you want to replace the desktop wallpaper, use the instructions related to your window manager. You may have to replace the image somewhere under /usr/share"
+	infoe "If you need to copy in new files to the ISO, use another terminal to copy to remaster/livecdtmp/extract-cd/ as root"
+	infoe "To use apt-get properly, you may have to copy from your /etc/apt/sources.list to this ISO, then run apt-get update and finally resolvconf -u to connect to the internet"
+	infoe "When you are done, just type 'exit' to continue the process"
+	infoe "You are now in the target ISO's chroot context"
 	sudo chroot edit
 
 	# Step 5:
 	# Back out of the chroot
 	#sudo chroot edit umount /proc || sudo chroot edit umount -lf /proc
-	echo "Backing out of the chroot"
+	infoe "Backing out of the chroot"
 	sudo chroot edit umount /proc || :
 	sudo chroot edit umount /sys || :
 	#sudo chroot edit umount /dev/pts
@@ -219,11 +227,11 @@ customizeiso() {
 customizekernel() {
 	ensure_consistent_environment
 
-	echo "You are now outside of the ISO chroot."
-	echo "If you want to, you can enter kernel commands or other changes from outside of the ISO"
-	echo "If you want to turn off the 'try or install' screen, use these instructions: http://askubuntu.com/a/47613"
-	echo "isolinux.cfg and txt.cfg are in extract-cd/isolinux"
-	echo "When done, type 'exit' to begin the ISO creation process"
+	infoe "You are now outside of the ISO chroot."
+	infoe "If you want to, you can enter kernel commands or other changes from outside of the ISO"
+	infoe "If you want to turn off the 'try or install' screen, use these instructions: http://askubuntu.com/a/47613"
+	infoe "isolinux.cfg and txt.cfg are in extract-cd/isolinux"
+	infoe "When done, type 'exit' to begin the ISO creation process"
 	bash
 
 	# =======
@@ -242,7 +250,7 @@ buildiso() {
 
 	sudo chmod a+w "$manifest"
 
-	echo "chroot edit dpkg-query -W --showformat='\${Package} \${Version}\n' > '$manifest'" | sudo sh >> ./remaster.log
+	infoe "chroot edit dpkg-query -W --showformat='\${Package} \${Version}\n' > '$manifest'" | sudo sh >> ./remaster.log
 	sudo cp "$manifest" "$manifest_d"
 	sudo sed -i '/ubiquity/d' "$manifest_d"
 	sudo sed -i '/casper/d' "$manifest_d"
@@ -251,10 +259,10 @@ buildiso() {
 
 	local iso_size="$(sudo du -sx --block-size=1 edit | cut -f1)"
 
-	echo "printf $iso_size > extract-cd/casper/filesystem.size" | sudo sh >> ./remaster.log
+	infoe "printf $iso_size > extract-cd/casper/filesystem.size" | sudo sh >> ./remaster.log
 	sudo nano extract-cd/README.diskdefines
 	sudo rm extract-cd/md5sum.txt
-	echo "find extract-cd/ -type f -print0 | xargs -0 md5sum | grep -v extract-cd/isolinux/boot.cat | tee extract-cd/md5sum.txt" | sudo sh >> ./remaster.log
+	infoe "find extract-cd/ -type f -print0 | xargs -0 md5sum | grep -v extract-cd/isolinux/boot.cat | tee extract-cd/md5sum.txt" | sudo sh >> ./remaster.log
 	local image_name='Custom ISO'
 	sudo mkisofs -D -r -V "$image_name" -cache-inodes -J -l -b isolinux/isolinux.bin -c isolinux/boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -o "../$NEW_ISO_NAME" extract-cd/
 	sudo chmod 775 "../$NEW_ISO_NAME"
@@ -263,7 +271,7 @@ buildiso() {
 
 	isohybrid "$NEW_ISO_NAME"
 
-	echo "You can now delete ./livecdtmp (requires root privileges)."
+	infoe "You can now delete ./livecdtmp (requires root privileges)."
 }
 
 main "$@"
