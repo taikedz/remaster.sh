@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 function printhelp {
 cat <<EOHELP
@@ -10,7 +11,6 @@ With contributions by Tai Kedzierski https://github.com/taikedz/remaster.sh
 
 Usage:
 
-    $0 path/to/old.iso path/to/new.iso [--entry=ENTRYPOINT]
     $0 --iniso=old.iso --outiso=new.iso [--entry=ENTRYPOINT]
 
 ENTRYPOINT is a flag at which you can resume a function of the script. The supported entry points are:
@@ -61,8 +61,10 @@ main() {
 		    exit
 		    ;;
 		*)
-		    [[ ! -f "$term" ]] && echo "Unknown option $term"
-		    exit 98
+		    [[ ! -f "$term" ]] && {
+		    	echo "Unknown option $term"
+		    	exit 98
+		    }
 		    ;;
 	    esac
 	done
@@ -75,10 +77,13 @@ main() {
 		# last to first
 		mountiso)
 			mountiso;;
+
 		customizeiso)
 			customizeiso;;
+
 		customizekernel)
 			customizekernel;;
+
 		buildiso)
 			buildiso;;
 		*)
@@ -89,7 +94,7 @@ main() {
 }
 
 check_iso_names() {
-	if [[ -z "$ORIGINAL_ISO_NAME" || "-z $NEW_ISO_NAME" ]]; then
+	if [[ -z "$ORIGINAL_ISO_NAME" ]] || [[ -z "$NEW_ISO_NAME" ]]; then
 	    printhelp
 	    exit 1
 	fi
@@ -99,7 +104,7 @@ prompt_install_prereqs() {
 	read -p "Install pre-requisites? > " resp && [[ $resp =~ $yespat ]] && {
 	    echo "Installing/updating squashfs-tools and syslinux"
 	    sudo apt-get update && sudo apt-get install squashfs-tools syslinux -y
-	}
+	} || :
 }
 
 ensure_tempdir() {
@@ -115,7 +120,7 @@ isoname_in_temp() {
 	if [[ -f "../$ORIGINAL_ISO_NAME" ]]; then
 	    ORIGINAL_ISO_NAME="../$ORIGINAL_ISO_NAME"
 	elif [[ ! -f "$ORIGINAL_ISO_NAME" ]]; then
-	    echo "$ORIGINAL_FILE_NAME cannot be found. Please specify its full path with the --iniso parameter." >&2
+	    echo "$ORIGINAL_ISO_NAME cannot be found. Please specify its full path with the --iniso parameter." >&2
 	    exit 2
 	fi
 }
@@ -135,13 +140,14 @@ ensure_consistent_environment() {
 are_you_happy() {
 	local thisstep="$1"; shift
 
+	echo "You can re-run this step using '$0 --entry=$thisstep --iniso=$ORIGINAL_ISO_NAME --outiso=$NEW_ISO_NAME'"
+
 	read -p "Are you happy with these changes ? > " resp
 
 	if [[ "$resp" =~ $yespat ]]; then
 		return 0
 	fi
 
-	echo "You can re-run this step using '$0 --entry=$thisstep'"
 	exit 5
 }
 
@@ -175,10 +181,10 @@ customizeiso() {
 
 	# Step 3:
 	# This makes our terminal's "perspective" come from ./livecdtmp/edit/
-	sudo mount -o bind /run edit/run
-	sudo chroot edit mount -t proc none /proc
-	sudo chroot edit mount -t sysfs none /sys
-	sudo mount -o bind /dev/pts edit/dev/pts
+	sudo mount -o bind /run edit/run || :
+	sudo chroot edit mount -t proc none /proc || :
+	sudo chroot edit mount -t sysfs none /sys || :
+	sudo mount -o bind /dev/pts edit/dev/pts || :
 
 	#sudo chroot edit export HOME=/root
 	#sudo chroot edit export LC_ALL=C
@@ -198,12 +204,12 @@ customizeiso() {
 	# Back out of the chroot
 	#sudo chroot edit umount /proc || sudo chroot edit umount -lf /proc
 	echo "Backing out of the chroot"
-	sudo chroot edit umount /proc
-	sudo chroot edit umount /sys
+	sudo chroot edit umount /proc || :
+	sudo chroot edit umount /sys || :
 	#sudo chroot edit umount /dev/pts
-	sudo umount mnt
-	sudo umount edit/run
-	sudo umount edit/dev/pts
+	sudo umount mnt || :
+	sudo umount edit/run || :
+	sudo umount edit/dev/pts || :
 
 	# =======
 	are_you_happy customizeiso
@@ -227,6 +233,7 @@ customizekernel() {
 
 buildiso() {
 	ensure_consistent_environment
+	pwd
 
 	# Step 6:
 	local manifest="extract-cd/casper/filesystem.manifest"
@@ -235,14 +242,14 @@ buildiso() {
 
 	sudo chmod a+w "$manifest"
 
-	echo "chroot edit dpkg-query -W --showformat='${Package} ${Version}\n' > '$manifest'" | sudo sh >> ./remaster.log
+	echo "chroot edit dpkg-query -W --showformat='\${Package} \${Version}\n' > '$manifest'" | sudo sh >> ./remaster.log
 	sudo cp "$manifest" "$manifest_d"
 	sudo sed -i '/ubiquity/d' "$manifest_d"
 	sudo sed -i '/casper/d' "$manifest_d"
-	sudo rm "$squashfs"
+	sudo rm "$squashfs" || [[ ! -f "$squashfs" ]]
 	sudo mksquashfs edit "$squashfs"
 
-	local iso_size=`sudo du -sx --block-size=1 edit | cut -f1`
+	local iso_size="$(sudo du -sx --block-size=1 edit | cut -f1)"
 
 	echo "printf $iso_size > extract-cd/casper/filesystem.size" | sudo sh >> ./remaster.log
 	sudo nano extract-cd/README.diskdefines
@@ -258,3 +265,5 @@ buildiso() {
 
 	echo "You can now delete ./livecdtmp (requires root privileges)."
 }
+
+main "$@"
