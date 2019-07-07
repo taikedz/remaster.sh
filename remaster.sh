@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
 set -euo pipefail
 
 CLR_GRN="\033[33;1m"
@@ -8,6 +9,14 @@ CLR_DEF="\033[0m"
 infoe() {
 	echo -e "$CLR_GRN$*$CLR_DEF"
 }
+
+faile() {
+    echo -e "$CLR_RED$*$CLR_DEF"
+}
+
+readonly ERR_no_script=10
+readonly ERR_unknown_option=11
+readonly ERR_invalid_entrypoint=12
 
 printhelp() {
 cat <<EOHELP
@@ -19,9 +28,11 @@ With contributions by Tai Kedzierski https://github.com/taikedz/remaster.sh
 
 Usage:
 
-    $0 --iniso=old.iso --outiso=new.iso [--entry=ENTRYPOINT]
+    $0 --iniso=old.iso --outiso=new.iso [--entry=ENTRYPOINT] [--script=SCRIPT]
 
 ENTRYPOINT is a flag at which you can resume a function of the script. The supported entry points are:
+
+SCRIPT is a script that can be passed to the \`cusomizeiso\` stage. Instead of an interactive shell session, the script itself is run.
 
 mountiso
     Starts the process by mounting the original ISO,
@@ -64,6 +75,14 @@ main() {
 		--entry=*)
 		    ISOTASK="${term#--entry=}"
 		    ;;
+        --script=*)
+            CUSTOMSCRIPT="${term#--script=}"
+            CUSTOMSCRIPT="$(python3 -c "import os; print(os.path.abspath('$CUSTOMSCRIPT'))")"
+            [[ -f "$CUSTOMSCRIPT" ]] || {
+                faile "File $CUSTOMSCRIPT could not be found"
+                exit $ERR_no_script
+            }
+            ;;
 		--help)
 		    printhelp
 		    exit
@@ -71,7 +90,7 @@ main() {
 		*)
 		    [[ ! -f "$term" ]] && {
 		    	faile "Unknown option $term"
-		    	exit 98
+		    	exit $ERR_unknown_option
 		    }
 		    ;;
 	    esac
@@ -96,7 +115,7 @@ main() {
 			buildiso;;
 		*)
 			faile "Invalid entry point"
-			exit 2
+			exit $ERR_invalid_entrypoint
 			;;
 	esac
 }
@@ -170,16 +189,18 @@ are_you_happy() {
 
 mountiso() {
 	# Step 1:
+    givestep mountiso
 	ensure_consistent_environment
 
 	# Step 2:
 	# Mount the ISO as a loop filesystem to ./livecdtmp/mnt
 	# This will allow us to look at its insides, basically
 	mkdir -p ./mnt
+    MOUNTEDISO="$PWD/mnt"
 
 	sudo mount -o loop "$ORIGINAL_ISO_NAME" ./mnt
 
-	sudo mkdir extract-cd
+	sudo mkdir -p extract-cd
 
 	# Copy all the ISO's innards except for filesystem.squashfs to extract-cd/
 	sudo rsync --exclude=/casper/filesystem.squashfs -a ./mnt/ ./extract-cd
@@ -190,44 +211,64 @@ mountiso() {
 	sudo unsquashfs mnt/casper/filesystem.squashfs
 	sudo mv squashfs-root edit
 
+    trap cleanup_mountiso EXIT
+    cleanup_mountiso() {
+        sudo umount "$MOUNTEDISO"
+    }
+
 	customizeiso
 }
 
 customizeiso() {
+    givestep customizeiso
 	ensure_consistent_environment
+
+    local errored_out=false
 
 	# Step 3:
 	# This makes our terminal's "perspective" come from ./livecdtmp/edit/
-	sudo mount -o bind /run edit/run || :
-	sudo chroot edit mount -t proc none /proc || :
-	sudo chroot edit mount -t sysfs none /sys || :
-	sudo mount -o bind /dev/pts edit/dev/pts || :
+	#sudo mount -o bind /run edit/run || :
+	#sudo chroot edit mount -t proc none /proc || :
+	#sudo chroot edit mount -t sysfs none /sys || :
+	#sudo mount -o bind /dev/pts edit/dev/pts || :
 
 	# Step 4:
-	infoe "Now make customizations from the CLI"
-	infoe "If you want to replace the desktop wallpaper, use the instructions related to your window manager. You may have to replace the image somewhere under /usr/share"
-	infoe "If you need to copy in new files to the ISO, use another terminal to copy to remaster/livecdtmp/extract-cd/ as root"
-	infoe "To use apt-get properly, you may have to copy from your /etc/apt/sources.list to this ISO, then run apt-get update and finally resolvconf -u to connect to the internet"
-	infoe "When you are done, just type 'exit' to continue the process"
-	infoe "You are now in the target ISO's chroot context"
+    if [[ "${CUSTOMSCRIPT:-}" ]]; then
+        infoe "Running $CUSTOMSCRIPT for customization"
+        local scriptname="$(basename "$CUSTOMSCRIPT")"
+        sudo cp "$CUSTOMSCRIPT" "edit/$scriptname"
+        sudo chmod 755 "edit/$scriptname"
+        sudo chroot edit "/$scriptname" || errored_out=true
+    else
+        infoe "Now make customizations from the CLI"
+        infoe "If you want to replace the desktop wallpaper, use the instructions related to your window manager. You may have to replace the image somewhere under /usr/share"
+        infoe "If you need to copy in new files to the ISO, use another terminal to copy to remaster/livecdtmp/extract-cd/ as root"
+        infoe "To use apt-get properly, you may have to copy from your /etc/apt/sources.list to this ISO, then run apt-get update and finally resolvconf -u to connect to the internet"
+        infoe "When you are done, just type 'exit' to continue the process"
+        infoe "You are now in the target ISO's chroot context"
 
-	HOME=/root LC_ALL=C sudo chroot edit
+        PS1='\[\e[32;1m\]\u@customize-iso > \[\e[0m\]' HOME="/root" LC_ALL="C" sudo chroot edit
+    fi
 
 	# Step 5:
 	# Back out of the chroot
-	infoe "Backing out of the chroot"
-	sudo chroot edit umount /proc || :
-	sudo chroot edit umount /sys || :
-	sudo umount mnt || :
-	sudo umount edit/run || :
-	sudo umount edit/dev/pts || :
+	#infoe "Backing out of the chroot"
+	#sudo chroot edit umount /proc || :
+	#sudo chroot edit umount /sys || :
+	#sudo umount mnt || :
+	#sudo umount edit/run || :
+	#sudo umount edit/dev/pts || :
 
 	# =======
+    if [[ "$errored_out" != true ]]; then
+        faile "Customization errored out !"
+    fi
 	are_you_happy customizeiso
 	customizekernel
 } # ====================================
 
 customizekernel() {
+    givestep customizekernel
 	ensure_consistent_environment
 
 	infoe "You are now outside of the ISO chroot."
@@ -243,6 +284,7 @@ customizekernel() {
 } # ====================================
 
 buildiso() {
+    givestep buildiso
 	ensure_consistent_environment
 	pwd
 
@@ -253,7 +295,7 @@ buildiso() {
 
 	sudo chmod a+w "$manifest"
 
-	infoe "chroot edit dpkg-query -W --showformat='\${Package} \${Version}\n' > '$manifest'" | sudo sh >> ./remaster.log
+	echo "chroot edit dpkg-query -W --showformat='\${Package} \${Version}\n' > '$manifest'" | sudo sh >> ./remaster.log
 	sudo cp "$manifest" "$manifest_d"
 	sudo sed -i '/ubiquity/d' "$manifest_d"
 	sudo sed -i '/casper/d' "$manifest_d"
@@ -262,10 +304,10 @@ buildiso() {
 
 	local iso_size="$(sudo du -sx --block-size=1 edit | cut -f1)"
 
-	infoe "printf $iso_size > extract-cd/casper/filesystem.size" | sudo sh >> ./remaster.log
+	echo "printf $iso_size > extract-cd/casper/filesystem.size" | sudo sh >> ./remaster.log
 	sudo nano extract-cd/README.diskdefines
 	sudo rm extract-cd/md5sum.txt
-	infoe "find extract-cd/ -type f -print0 | xargs -0 md5sum | grep -v extract-cd/isolinux/boot.cat | tee extract-cd/md5sum.txt" | sudo sh >> ./remaster.log
+	echo "find extract-cd/ -type f -print0 | xargs -0 md5sum | grep -v extract-cd/isolinux/boot.cat | tee extract-cd/md5sum.txt" | sudo sh >> ./remaster.log
 	local image_name='Custom ISO'
 	sudo mkisofs -D -r -V "$image_name" -cache-inodes -J -l -b isolinux/isolinux.bin -c isolinux/boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -o "../$NEW_ISO_NAME" extract-cd/
 	sudo chmod 775 "../$NEW_ISO_NAME"
@@ -276,5 +318,20 @@ buildiso() {
 
 	infoe "You can now delete ./livecdtmp (requires root privileges)."
 }
+
+# =========
+# Report exit
+givestep() {
+    RUNNINGSTEP="$1"
+}
+
+exitstep() {
+    if [[ "$?" != 0 ]]; then
+        infoe "Failed during entrypoint '$RUNNINGSTEP'"
+    fi
+}
+
+trap exitstep EXIT
+# ========
 
 main "$@"
