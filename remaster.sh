@@ -2,16 +2,21 @@
 
 set -euo pipefail
 
-CLR_GRN="\033[33;1m"
-CLR_RED="\033[31;1m"
-CLR_DEF="\033[0m"
+CLR_RED=$'\033[31;1m'
+CLR_YEL=$'\033[32;1m'
+CLR_GRN=$'\033[33;1m'
+CLR_DEF=$'\033[0m'
 
 infoe() {
-	echo -e "$CLR_GRN$*$CLR_DEF"
+	echo "$CLR_GRN$*$CLR_DEF" >&2
+}
+
+warne() {
+    echo "$CLR_YEL$*$CLR_DEF" >&2
 }
 
 faile() {
-    echo -e "$CLR_RED$*$CLR_DEF"
+    echo "$CLR_RED$*$CLR_DEF" >&2
 }
 
 readonly ERR_no_script=10
@@ -55,6 +60,7 @@ EOHELP
 }
 
 main() {
+    givestep "Initialize"
 
 	yespat='^(yes|y|YES|Y|aye?|AYE?)$'
 	ISOTASK=mountiso
@@ -213,7 +219,7 @@ mountiso() {
 
     trap cleanup_mountiso EXIT
     cleanup_mountiso() {
-        sudo umount "$MOUNTEDISO"
+        sudo umount "$MOUNTEDISO" || :
     }
 
 	customizeiso
@@ -227,10 +233,10 @@ customizeiso() {
 
 	# Step 3:
 	# This makes our terminal's "perspective" come from ./livecdtmp/edit/
-	#sudo mount -o bind /run edit/run || :
-	#sudo chroot edit mount -t proc none /proc || :
-	#sudo chroot edit mount -t sysfs none /sys || :
-	#sudo mount -o bind /dev/pts edit/dev/pts || :
+	sudo mount -o bind /run edit/run || :
+	sudo chroot edit mount -t proc none /proc || :
+	sudo chroot edit mount -t sysfs none /sys || :
+	sudo mount -o bind /dev/pts edit/dev/pts || :
 
 	# Step 4:
     if [[ "${CUSTOMSCRIPT:-}" ]]; then
@@ -247,17 +253,20 @@ customizeiso() {
         infoe "When you are done, just type 'exit' to continue the process"
         infoe "You are now in the target ISO's chroot context"
 
-        PS1='\[\e[32;1m\]\u@customize-iso > \[\e[0m\]' HOME="/root" LC_ALL="C" sudo chroot edit
+        PS1='\[\e[32;1m\]\u@customize-iso > \[\e[0m\]' HOME="/root" LC_ALL="C" sudo chroot edit || errored_out=true
     fi
 
 	# Step 5:
 	# Back out of the chroot
-	#infoe "Backing out of the chroot"
-	#sudo chroot edit umount /proc || :
-	#sudo chroot edit umount /sys || :
-	#sudo umount mnt || :
-	#sudo umount edit/run || :
-	#sudo umount edit/dev/pts || :
+	infoe "Backing out of the chroot"
+	sudo chroot edit umount /proc || :
+	sudo chroot edit umount /sys || :
+	sudo umount edit/run || :
+	sudo umount edit/dev/pts || :
+
+    if mount|grep "$PWD" ; then
+        warne "Could not unmount certain devices - DO NOT use 'rm -rf' on the livecd temp"
+    fi
 
 	# =======
     if [[ "$errored_out" != true ]]; then
@@ -276,7 +285,7 @@ customizekernel() {
 	infoe "If you want to turn off the 'try or install' screen, use these instructions: http://askubuntu.com/a/47613"
 	infoe "isolinux.cfg and txt.cfg are in extract-cd/isolinux"
 	infoe "When done, type 'exit' to begin the ISO creation process"
-	bash
+	PS1=$'\[\033[32m\] customizekernel > ' bash
 
 	# =======
 	are_you_happy customizekernel
@@ -299,7 +308,7 @@ buildiso() {
 	sudo cp "$manifest" "$manifest_d"
 	sudo sed -i '/ubiquity/d' "$manifest_d"
 	sudo sed -i '/casper/d' "$manifest_d"
-	sudo rm "$squashfs" || [[ ! -f "$squashfs" ]]
+	[[ ! -f "$squashfs" ]] || sudo rm "$squashfs"
 	sudo mksquashfs edit "$squashfs"
 
 	local iso_size="$(sudo du -sx --block-size=1 edit | cut -f1)"
@@ -314,7 +323,7 @@ buildiso() {
 
 	cd ..
 
-	isohybrid "$NEW_ISO_NAME"
+	sudo isohybrid "$NEW_ISO_NAME"
 
 	infoe "You can now delete ./livecdtmp (requires root privileges)."
 }
