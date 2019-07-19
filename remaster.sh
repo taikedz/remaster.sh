@@ -317,8 +317,14 @@ buildiso() {
     sudo cp "$manifest" "$manifest_d"
     sudo sed -i '/ubiquity/d' "$manifest_d"
     sudo sed -i '/casper/d' "$manifest_d"
+
+    local cpucount="$(grep -ci "model name" /proc/cpuinfo)"
+    if [[ "$cpucount" -gt 1 ]]; then
+        cpucount="$((cpucount/2))"
+    fi
+
     [[ ! -f "$squashfs" ]] || sudo rm "$squashfs"
-    sudo mksquashfs edit "$squashfs"
+    sudo mksquashfs edit "$squashfs" -processors "$cpucount"
 
     local iso_size="$(sudo du -sx --block-size=1 edit | cut -f1)"
 
