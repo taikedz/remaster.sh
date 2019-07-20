@@ -34,11 +34,13 @@ Tool to customize a [*]Ubuntu ISO. You need to use an ISO with a livecd environm
 
 Usage:
 
-    $0 --iniso=old.iso --outiso=new.iso [--entry=ENTRYPOINT] [--script=SCRIPT]
+    $0 --iniso=old.iso --outiso=new.iso [--entry=ENTRYPOINT] [--script=SCRIPT] [--data=FROMDIR:TODIR]
 
 SCRIPT is a script that can be passed to the \`cusomizeiso\` stage. Instead of an interactive shell session, the script itself is run.
 
 ENTRYPOINT is a flag at which you can resume a function of the script. The supported entry points are:
+
+To include a data directory from your host environment (for example, a custom profile folder, or data for your customization script to use), use the \`--data\` flag. \`FROMDIR\` and \`TODIR\` are absolute paths to the host directory, and its copy destination in the chroot, respectively.
 
 mountiso
 
@@ -97,6 +99,11 @@ main() {
                 faile "File $CUSTOMSCRIPT could not be found"
                 exit $ERR_no_script
             }
+            ;;
+        --data=*)
+            DATA_FROM="{term#--data=}"
+            DATA_TO="${DATA_FROM#*=}"
+            DATA_FROM="${DATA_FROM%%=*}"
             ;;
         --help)
             printhelp
@@ -238,7 +245,11 @@ customizeiso() {
     givestep customizeiso
     ensure_consistent_environment
 
-    local errored_out=false
+    if [[ -n "$DATA_FROM" ]] && [[ -n "$DATA_TO" ]]; then
+        rsync -av "$DATA_FROM/" "$PWD/$DATA_TO/" # FIXME can be abused with bad paths.
+    fi
+
+    local errored_out=false # Track error on script, when choosing not to exit-on-fail
 
     # Step 3:
     # This makes our terminal's "perspective" come from ./livecdtmp/edit/
