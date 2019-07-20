@@ -245,7 +245,7 @@ customizeiso() {
     givestep customizeiso
     ensure_consistent_environment
 
-    if [[ -n "$DATA_FROM" ]] && [[ -n "$DATA_TO" ]]; then
+    if [[ -n "${DATA_FROM:-}" ]] && [[ -n "${DATA_TO:-}" ]]; then
         rsync -av "$DATA_FROM/" "$PWD/$DATA_TO/" # FIXME can be abused with bad paths.
     fi
 
