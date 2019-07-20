@@ -220,6 +220,11 @@ mountiso() {
     mkdir -p ./mnt
     MOUNTEDISO="$PWD/mnt"
 
+    trap cleanup_mountiso EXIT
+    cleanup_mountiso() {
+        sudo umount "$MOUNTEDISO" || :
+    }
+
     sudo mount -o loop "$ORIGINAL_ISO_NAME" ./mnt
 
     sudo mkdir -p extract-cd
@@ -232,11 +237,6 @@ mountiso() {
     #   it needs to boot and install properly
     sudo unsquashfs mnt/casper/filesystem.squashfs
     sudo mv squashfs-root edit
-
-    trap cleanup_mountiso EXIT
-    cleanup_mountiso() {
-        sudo umount "$MOUNTEDISO" || :
-    }
 
     customizeiso
 }
